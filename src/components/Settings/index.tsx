@@ -10,6 +10,7 @@ import {
   Trash2,
   AlertTriangle,
   X,
+  RefreshCw,
 } from 'lucide-react';
 
 interface InstallResult {
@@ -32,6 +33,8 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
   const [showUninstallConfirm, setShowUninstallConfirm] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallResult, setUninstallResult] = useState<InstallResult | null>(null);
+  const [reinstalling, setReinstalling] = useState(false);
+  const [reinstallResult, setReinstallResult] = useState<InstallResult | null>(null);
 
   const handleSave = async () => {
     setSaving(true);
@@ -64,9 +67,7 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
       const result = await invoke<InstallResult>('uninstall_openclaw');
       setUninstallResult(result);
       if (result.success) {
-        // 通知环境状态变化，触发重新检查
         onEnvironmentChange?.();
-        // 卸载成功后关闭确认框
         setTimeout(() => {
           setShowUninstallConfirm(false);
         }, 2000);
@@ -79,6 +80,36 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
       });
     } finally {
       setUninstalling(false);
+    }
+  };
+
+  const handleReinstall = async () => {
+    setReinstalling(true);
+    setReinstallResult(null);
+    try {
+      // 先卸载
+      await invoke<InstallResult>('uninstall_openclaw');
+      // 再安装
+      const result = await invoke<InstallResult>('install_openclaw');
+      if (result.success) {
+        // 初始化配置
+        await invoke<InstallResult>('init_openclaw_config');
+        setReinstallResult({
+          success: true,
+          message: 'OpenClaw 重新安装成功！',
+        });
+        onEnvironmentChange?.();
+      } else {
+        setReinstallResult(result);
+      }
+    } catch (e) {
+      setReinstallResult({
+        success: false,
+        message: '重新安装失败',
+        error: String(e),
+      });
+    } finally {
+      setReinstalling(false);
     }
   };
 
@@ -229,6 +260,38 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
           </div>
 
           <div className="space-y-3">
+            {/* 重新安装 */}
+            <button
+              onClick={handleReinstall}
+              disabled={reinstalling}
+              className="w-full flex items-center gap-3 p-4 bg-dark-600 rounded-lg hover:bg-dark-500 transition-colors text-left border border-dark-500"
+            >
+              {reinstalling ? (
+                <Loader2 size={18} className="text-claw-400 animate-spin" />
+              ) : (
+                <RefreshCw size={18} className="text-claw-400" />
+              )}
+              <div className="flex-1">
+                <p className="text-sm text-white">
+                  {reinstalling ? '重新安装中...' : '重新安装 OpenClaw'}
+                </p>
+                <p className="text-xs text-gray-500">卸载后重新安装最新版本，配置文件保留</p>
+              </div>
+            </button>
+
+            {/* 重新安装结果 */}
+            {reinstallResult && (
+              <div className={`p-3 rounded-lg ${reinstallResult.success ? 'bg-green-500/10 border border-green-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
+                <p className={`text-sm ${reinstallResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                  {reinstallResult.message}
+                </p>
+                {reinstallResult.error && (
+                  <p className="text-xs text-red-400/70 mt-1">{reinstallResult.error}</p>
+                )}
+              </div>
+            )}
+
+            {/* 卸载 */}
             <button
               onClick={() => setShowUninstallConfirm(true)}
               className="w-full flex items-center gap-3 p-4 bg-red-950/30 rounded-lg hover:bg-red-900/40 transition-colors text-left border border-red-900/30"
