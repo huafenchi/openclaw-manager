@@ -907,35 +907,40 @@ pub async fn uninstall_openclaw() -> Result<InstallResult, String> {
 
 /// Windows 卸载 OpenClaw
 async fn uninstall_openclaw_windows() -> Result<InstallResult, String> {
-    // 使用 cmd.exe 执行 npm uninstall，避免 PowerShell 执行策略问题
-    info!("[卸载OpenClaw] 执行 npm uninstall -g openclaw...");
+    info!("[卸载OpenClaw] 执行卸载...");
     
-    match shell::run_cmd_output("npm uninstall -g openclaw") {
-        Ok(output) => {
-            info!("[卸载OpenClaw] npm 输出: {}", output);
-            
-            // 验证卸载是否成功
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            if get_openclaw_version().is_none() {
-                Ok(InstallResult {
-                    success: true,
-                    message: "OpenClaw 已成功卸载！".to_string(),
-                    error: None,
-                })
-            } else {
-                Ok(InstallResult {
-                    success: false,
-                    message: "卸载命令已执行，但 OpenClaw 仍然存在，请尝试手动卸载".to_string(),
-                    error: Some(output),
-                })
-            }
-        }
-        Err(e) => {
-            warn!("[卸载OpenClaw] npm uninstall 失败: {}", e);
+    // 尝试 npm 和 pnpm
+    let _ = shell::run_cmd_output("npm uninstall -g openclaw");
+    let _ = shell::run_cmd_output("pnpm remove -g openclaw");
+    
+    // 停止服务
+    let _ = shell::run_cmd_output("openclaw gateway stop");
+    
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    
+    if get_openclaw_version().is_none() {
+        Ok(InstallResult {
+            success: true,
+            message: "OpenClaw 已成功卸载！".to_string(),
+            error: None,
+        })
+    } else {
+        // 兜底：直接删除
+        let _ = shell::run_cmd_output("where openclaw");
+        let _ = shell::run_cmd_output("npm uninstall -g openclaw 2>nul & pnpm remove -g openclaw 2>nul");
+        
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if get_openclaw_version().is_none() {
+            Ok(InstallResult {
+                success: true,
+                message: "OpenClaw 已成功卸载！".to_string(),
+                error: None,
+            })
+        } else {
             Ok(InstallResult {
                 success: false,
-                message: "OpenClaw 卸载失败".to_string(),
-                error: Some(e),
+                message: "自动卸载失败，请手动执行: npm uninstall -g openclaw".to_string(),
+                error: None,
             })
         }
     }
@@ -944,12 +949,36 @@ async fn uninstall_openclaw_windows() -> Result<InstallResult, String> {
 /// Unix 系统卸载 OpenClaw
 async fn uninstall_openclaw_unix() -> Result<InstallResult, String> {
     let script = r#"
+# 加载 Node 环境（fnm/nvm/volta）
+export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
+eval "$(fnm env 2>/dev/null)" 2>/dev/null
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null
+export VOLTA_HOME="$HOME/.volta"
+export PATH="$VOLTA_HOME/bin:$PATH"
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
 echo "卸载 OpenClaw..."
-npm uninstall -g openclaw
+
+# 尝试多种卸载方式
+if command -v pnpm &> /dev/null; then
+    pnpm remove -g openclaw 2>/dev/null
+fi
+npm uninstall -g openclaw 2>/dev/null
+
+# 直接删除二进制（兜底）
+OPENCLAW_BIN=$(which openclaw 2>/dev/null)
+if [ -n "$OPENCLAW_BIN" ]; then
+    rm -f "$OPENCLAW_BIN" 2>/dev/null
+fi
+
+# 停止服务
+launchctl unload ~/Library/LaunchAgents/ai.openclaw.gateway.plist 2>/dev/null
 
 # 验证卸载
+sleep 1
 if command -v openclaw &> /dev/null; then
-    echo "警告：openclaw 命令仍然存在"
+    echo "警告：openclaw 命令仍然存在于 $(which openclaw)"
     exit 1
 else
     echo "OpenClaw 已成功卸载"
