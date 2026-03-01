@@ -398,38 +398,55 @@ if ($nodeVersion) {
 
 /// macOS 安装 Node.js
 async fn install_nodejs_macos() -> Result<InstallResult, String> {
-    // 使用 Homebrew 安装
+    // 优先用 fnm（不需要 sudo）
     let script = r#"
-# 检查 Homebrew
-if ! command -v brew &> /dev/null; then
-    echo "安装 Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# 如果已经有 Homebrew，直接用 brew
+if command -v brew &> /dev/null; then
+    echo "使用 Homebrew 安装 Node.js 22..."
+    brew install node@22 2>&1
+    brew link --overwrite node@22 2>&1 || true
     
-    # 配置 PATH
-    if [[ -f /opt/homebrew/bin/brew ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [[ -f /usr/local/bin/brew ]]; then
-        eval "$(/usr/local/bin/brew shellenv)"
+    if command -v node &> /dev/null; then
+        node --version
+        exit 0
     fi
 fi
 
-echo "安装 Node.js 22..."
-brew install node@22
-brew link --overwrite node@22
+# fallback: 用 fnm（不需要 sudo，不需要 Homebrew）
+echo "使用 fnm 安装 Node.js..."
+curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
+eval "$(fnm env 2>/dev/null)" 2>/dev/null || true
 
-# 验证安装
+fnm install 22
+fnm default 22
+fnm use 22
+
 node --version
 "#;
     
     match shell::run_bash_output(script) {
-        Ok(output) => Ok(InstallResult {
-            success: true,
-            message: format!("Node.js 安装成功！{}", output),
-            error: None,
-        }),
+        Ok(output) => {
+            // 验证安装
+            if output.contains("v22") || output.contains("v23") || output.contains("v24") {
+                Ok(InstallResult {
+                    success: true,
+                    message: format!("Node.js 安装成功！{}", output),
+                    error: None,
+                })
+            } else {
+                Ok(InstallResult {
+                    success: false,
+                    message: "安装后无法验证 Node.js 版本，请重启应用重试".to_string(),
+                    error: Some(output),
+                })
+            }
+        }
         Err(e) => Ok(InstallResult {
             success: false,
-            message: "Node.js 安装失败".to_string(),
+            message: "Node.js 安装失败，请尝试手动安装".to_string(),
             error: Some(e),
         }),
     }
@@ -437,44 +454,70 @@ node --version
 
 /// Linux 安装 Node.js
 async fn install_nodejs_linux() -> Result<InstallResult, String> {
-    // 使用 NodeSource 仓库安装
+    // 优先用 fnm（不需要 sudo）
     let script = r#"
-# 检测包管理器
-if command -v apt-get &> /dev/null; then
-    echo "检测到 apt，使用 NodeSource 仓库..."
-    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-    sudo apt-get install -y nodejs
-elif command -v dnf &> /dev/null; then
-    echo "检测到 dnf，使用 NodeSource 仓库..."
-    curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-    sudo dnf install -y nodejs
-elif command -v yum &> /dev/null; then
-    echo "检测到 yum，使用 NodeSource 仓库..."
-    curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
-    sudo yum install -y nodejs
-elif command -v pacman &> /dev/null; then
-    echo "检测到 pacman..."
-    sudo pacman -S nodejs npm --noconfirm
-else
-    echo "无法检测到支持的包管理器"
-    exit 1
+# 先试 fnm（不需要 sudo）
+echo "使用 fnm 安装 Node.js..."
+curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
+eval "$(fnm env 2>/dev/null)" 2>/dev/null || true
+
+fnm install 22
+fnm default 22
+fnm use 22
+
+if command -v node &> /dev/null; then
+    node --version
+    exit 0
 fi
 
-# 验证安装
-node --version
+# fallback: 检查是否有 sudo 权限
+if sudo -n true 2>/dev/null; then
+    if command -v apt-get &> /dev/null; then
+        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+    elif command -v dnf &> /dev/null; then
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+        sudo dnf install -y nodejs
+    fi
+    node --version
+else
+    echo "NEED_TERMINAL"
+    exit 1
+fi
 "#;
     
     match shell::run_bash_output(script) {
-        Ok(output) => Ok(InstallResult {
-            success: true,
-            message: format!("Node.js 安装成功！{}", output),
-            error: None,
-        }),
-        Err(e) => Ok(InstallResult {
-            success: false,
-            message: "Node.js 安装失败".to_string(),
-            error: Some(e),
-        }),
+        Ok(output) => {
+            if output.contains("v22") || output.contains("v23") || output.contains("v24") {
+                Ok(InstallResult {
+                    success: true,
+                    message: format!("Node.js 安装成功！{}", output),
+                    error: None,
+                })
+            } else {
+                Ok(InstallResult {
+                    success: false,
+                    message: "安装后无法验证版本，请重启应用".to_string(),
+                    error: Some(output),
+                })
+            }
+        }
+        Err(e) => {
+            if e.contains("NEED_TERMINAL") {
+                Ok(InstallResult {
+                    success: false,
+                    message: "需要管理员权限，请在终端中手动安装".to_string(),
+                    error: Some("请运行: curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs".to_string()),
+                })
+            } else {
+                Ok(InstallResult {
+                    success: false,
+                    message: "Node.js 安装失败".to_string(),
+                    error: Some(e),
+                })
+            }
+        }
     }
 }
 

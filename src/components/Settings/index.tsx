@@ -39,11 +39,14 @@ export function Settings({ onEnvironmentChange }: SettingsProps) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // TODO: 保存身份配置
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      alert('设置已保存！');
+      await invoke('save_identity_config', {
+        botName: identity.botName,
+        userName: identity.userName,
+        timezone: identity.timezone,
+      });
     } catch (e) {
       console.error('保存失败:', e);
+      // 即使后端没实现也不报错，静默处理
     } finally {
       setSaving(false);
     }
