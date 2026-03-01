@@ -43,8 +43,24 @@ pub fn get_extended_path() -> String {
             }
         }
         
-        // fnm
+        // fnm (两种可能的位置)
         paths.push(format!("{}/.fnm/aliases/default/bin", home_str));
+        // fnm XDG 路径 (macOS/Linux 默认)
+        let fnm_dir = format!("{}/.local/share/fnm/node-versions", home_str);
+        if let Ok(entries) = std::fs::read_dir(&fnm_dir) {
+            for entry in entries.flatten() {
+                let bin_path = entry.path().join("installation/bin");
+                if bin_path.exists() {
+                    paths.insert(0, bin_path.display().to_string());
+                    break;
+                }
+            }
+        }
+        // fnm aliases
+        let fnm_alias = format!("{}/.local/share/fnm/aliases/default/bin", home_str);
+        if std::path::Path::new(&fnm_alias).exists() {
+            paths.insert(0, fnm_alias);
+        }
         
         // volta
         paths.push(format!("{}/.volta/bin", home_str));

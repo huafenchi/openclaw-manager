@@ -558,6 +558,18 @@ if ($openclawVersion) {
 /// Unix 系统安装 OpenClaw
 async fn install_openclaw_unix() -> Result<InstallResult, String> {
     let script = r#"
+# 加载 Node 环境
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+for d in $HOME/.local/share/fnm/node-versions/*/installation/bin; do
+  [ -d "$d" ] && export PATH="$d:$PATH"
+done
+[ -d "$HOME/.fnm/aliases/default/bin" ] && export PATH="$HOME/.fnm/aliases/default/bin:$PATH"
+which fnm >/dev/null 2>&1 && eval "$(fnm env 2>/dev/null)" 2>/dev/null
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null
+export VOLTA_HOME="$HOME/.volta"
+export PATH="$VOLTA_HOME/bin:$PATH"
+
 # 检查 Node.js
 if ! command -v node &> /dev/null; then
     echo "错误：请先安装 Node.js"
@@ -950,40 +962,59 @@ async fn uninstall_openclaw_windows() -> Result<InstallResult, String> {
 async fn uninstall_openclaw_unix() -> Result<InstallResult, String> {
     let script = r#"
 # 加载 Node 环境（fnm/nvm/volta）
-export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
-eval "$(fnm env 2>/dev/null)" 2>/dev/null
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# fnm XDG 路径
+for d in $HOME/.local/share/fnm/node-versions/*/installation/bin; do
+  [ -d "$d" ] && export PATH="$d:$PATH"
+done
+# fnm 传统路径
+[ -d "$HOME/.fnm/aliases/default/bin" ] && export PATH="$HOME/.fnm/aliases/default/bin:$PATH"
+# fnm 环境
+which fnm >/dev/null 2>&1 && eval "$(fnm env 2>/dev/null)" 2>/dev/null
+
+# nvm
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null
+
+# volta
 export VOLTA_HOME="$HOME/.volta"
 export PATH="$VOLTA_HOME/bin:$PATH"
-export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
+echo "PATH=$PATH"
+echo "npm=$(which npm 2>/dev/null)"
+echo "node=$(which node 2>/dev/null)"
+echo "openclaw=$(which openclaw 2>/dev/null)"
 
 echo "卸载 OpenClaw..."
 
+# 停止服务
+openclaw gateway stop 2>/dev/null
+launchctl unload ~/Library/LaunchAgents/ai.openclaw.gateway.plist 2>/dev/null
+
 # 尝试多种卸载方式
-if command -v pnpm &> /dev/null; then
-    pnpm remove -g openclaw 2>/dev/null
-fi
 npm uninstall -g openclaw 2>/dev/null
+pnpm remove -g openclaw 2>/dev/null
 
 # 直接删除二进制（兜底）
 OPENCLAW_BIN=$(which openclaw 2>/dev/null)
 if [ -n "$OPENCLAW_BIN" ]; then
+    echo "直接删除: $OPENCLAW_BIN"
     rm -f "$OPENCLAW_BIN" 2>/dev/null
 fi
 
-# 停止服务
-launchctl unload ~/Library/LaunchAgents/ai.openclaw.gateway.plist 2>/dev/null
-
 # 验证卸载
 sleep 1
-if command -v openclaw &> /dev/null; then
+if which openclaw >/dev/null 2>&1; then
     echo "警告：openclaw 命令仍然存在于 $(which openclaw)"
-    exit 1
-else
-    echo "OpenClaw 已成功卸载"
-    exit 0
+    # 最后手段：强制删除
+    rm -f "$(which openclaw)" 2>/dev/null
+    if which openclaw >/dev/null 2>&1; then
+        exit 1
+    fi
 fi
+echo "OpenClaw 已成功卸载"
+exit 0
 "#;
     
     match shell::run_bash_output(script) {
