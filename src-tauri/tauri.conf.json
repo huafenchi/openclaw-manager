@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OpenClaw Manager",
-  "version": "0.0.7",
-  "identifier": "com.openclaw.manager",
+  "productName": "ClawGate Manager",
+  "version": "1.0.0",
+  "identifier": "com.clawgate.manager",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "OpenClaw Manager",
+        "title": "ClawGate Manager",
         "label": "main",
         "width": 1200,
         "height": 800,
@@ -42,9 +42,9 @@
       "icons/icon.ico"
     ],
     "category": "Utility",
-    "shortDescription": "OpenClaw AI 助手管理工具",
-    "longDescription": "OpenClaw Manager 是一个跨平台的高性能管理工具，用于配置和管理 OpenClaw AI 助手服务。",
-    "copyright": "Copyright © 2024 OpenClaw Team",
+    "shortDescription": "ClawGate AI 助手管理工具",
+    "longDescription": "ClawGate Manager 是一个跨平台的高性能管理工具，用于配置和管理 OpenClaw AI 助手服务。基于 ClawGate API 中转平台，一键配置 Claude、GPT、Gemini 等模型。",
+    "copyright": "Copyright © 2026 ClawGate",
     "macOS": {
       "minimumSystemVersion": "10.15",
       "entitlements": null,

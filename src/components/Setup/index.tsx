@@ -9,7 +9,12 @@ import {
   RefreshCw,
   ExternalLink,
   Cpu,
-  Package
+  Package,
+  Key,
+  Eye,
+  EyeOff,
+  Check,
+  XCircle,
 } from 'lucide-react';
 import { setupLogger } from '../../lib/logger';
 
@@ -30,6 +35,37 @@ interface InstallResult {
   error: string | null;
 }
 
+interface SuggestedModel {
+  id: string;
+  name: string;
+  description: string | null;
+  context_window: number | null;
+  max_tokens: number | null;
+  recommended: boolean;
+}
+
+interface OfficialProvider {
+  id: string;
+  name: string;
+  icon: string;
+  default_base_url: string | null;
+  api_type: string;
+  suggested_models: SuggestedModel[];
+  requires_api_key: boolean;
+  docs_url: string | null;
+}
+
+interface ModelConfig {
+  id: string;
+  name: string;
+  api: string | null;
+  input: string[];
+  context_window: number | null;
+  max_tokens: number | null;
+  reasoning: boolean | null;
+  cost: { input: number; output: number; cache_read: number; cache_write: number } | null;
+}
+
 interface SetupProps {
   onComplete: () => void;
   /** 是否嵌入模式（嵌入到 Dashboard 中显示） */
@@ -41,7 +77,13 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
   const [checking, setChecking] = useState(true);
   const [installing, setInstalling] = useState<'nodejs' | 'openclaw' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [step, setStep] = useState<'check' | 'install' | 'complete'>('check');
+  const [step, setStep] = useState<'check' | 'install' | 'apikey' | 'complete'>('check');
+
+  // API Key 相关
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
 
   const checkEnvironment = async () => {
     setupLogger.info('检查系统环境...');
@@ -53,10 +95,8 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
       setEnvStatus(status);
 
       if (status.ready) {
-        setupLogger.info('✅ 环境就绪');
-        setStep('complete');
-        // 延迟一下再跳转，让用户看到成功状态
-        setTimeout(() => onComplete(), 1500);
+        setupLogger.info('✅ 环境就绪，进入 API Key 配置');
+        setStep('apikey');
       } else {
         setupLogger.warn('环境未就绪，需要安装依赖');
         setStep('install');
@@ -76,28 +116,22 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
 
   const handleInstallNodejs = async () => {
     setupLogger.action('安装 Node.js');
-    setupLogger.info('开始安装 Node.js...');
     setInstalling('nodejs');
     setError(null);
 
     try {
-      // 先尝试直接安装
       const result = await invoke<InstallResult>('install_nodejs');
 
       if (result.success) {
         setupLogger.info('✅ Node.js 安装成功');
-        // 重新检查环境
         await checkEnvironment();
       } else if (result.message.includes('重启')) {
-        // 需要重启应用
         setError('Node.js 安装完成，请重启应用以使环境变量生效');
       } else {
-        // 打开终端手动安装
         await invoke<string>('open_install_terminal', { installType: 'nodejs' });
         setError('已打开安装终端，请在终端中完成安装后点击"重新检查"');
       }
     } catch (e) {
-      // 如果自动安装失败，打开终端
       try {
         await invoke<string>('open_install_terminal', { installType: 'nodejs' });
         setError('已打开安装终端，请在终端中完成安装后点击"重新检查"');
@@ -111,7 +145,6 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
 
   const handleInstallOpenclaw = async () => {
     setupLogger.action('安装 OpenClaw');
-    setupLogger.info('开始安装 OpenClaw...');
     setInstalling('openclaw');
     setError(null);
 
@@ -120,19 +153,14 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
 
       if (result.success) {
         setupLogger.info('✅ OpenClaw 安装成功，初始化配置...');
-        // 初始化配置
         await invoke<InstallResult>('init_openclaw_config');
         setupLogger.info('✅ 配置初始化完成');
-        // 重新检查环境
         await checkEnvironment();
       } else {
-        setupLogger.warn('自动安装失败，打开终端手动安装');
-        // 打开终端手动安装
         await invoke<string>('open_install_terminal', { installType: 'openclaw' });
         setError('已打开安装终端，请在终端中完成安装后点击"重新检查"');
       }
     } catch (e) {
-      setupLogger.error('安装失败，尝试打开终端', e);
       try {
         await invoke<string>('open_install_terminal', { installType: 'openclaw' });
         setError('已打开安装终端，请在终端中完成安装后点击"重新检查"');
@@ -141,6 +169,56 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
       }
     } finally {
       setInstalling(null);
+    }
+  };
+
+  const handleSaveApiKey = async () => {
+    if (!apiKey.trim()) return;
+
+    setSavingKey(true);
+    setKeyError(null);
+
+    try {
+      // 获取预设 Provider 列表
+      const providers = await invoke<OfficialProvider[]>('get_official_providers');
+
+      // 自动配置所有 Provider
+      for (const provider of providers) {
+        const models: ModelConfig[] = provider.suggested_models.map(m => ({
+          id: m.id,
+          name: m.name,
+          api: provider.api_type,
+          input: ['text', 'image'],
+          context_window: m.context_window || 200000,
+          max_tokens: m.max_tokens || 8192,
+          reasoning: false,
+          cost: null,
+        }));
+
+        await invoke('save_provider', {
+          providerName: provider.id,
+          baseUrl: provider.default_base_url,
+          apiKey: apiKey.trim(),
+          apiType: provider.api_type,
+          models,
+        });
+      }
+
+      // 设置默认主模型
+      try {
+        await invoke('set_primary_model', { modelId: 'clawgate-claude/claude-opus-4-6' });
+      } catch {
+        // 忽略
+      }
+
+      setupLogger.info('✅ ClawGate API Key 已配置');
+      setStep('complete');
+      setTimeout(() => onComplete(), 1500);
+    } catch (e) {
+      setupLogger.error('保存 API Key 失败', e);
+      setKeyError('配置失败: ' + String(e));
+    } finally {
+      setSavingKey(false);
     }
   };
 
@@ -153,11 +231,11 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
     }
   };
 
-  // 渲染安装内容（复用于嵌入模式和全屏模式）
+  // 渲染内容
   const renderContent = () => {
     return (
       <AnimatePresence mode="wait">
-        {/* 检查中状态 */}
+        {/* 检查中 */}
         {checking && (
           <motion.div
             key="checking"
@@ -180,7 +258,16 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
             exit={{ opacity: 0 }}
             className="space-y-4"
           >
-            {/* 系统信息（仅非嵌入模式） */}
+            {/* 步骤指示器 */}
+            <div className="flex items-center justify-center gap-2 text-xs text-gray-500 pb-2">
+              <span className="px-2 py-1 rounded bg-claw-500/20 text-claw-400">1. 环境安装</span>
+              <ArrowRight size={12} />
+              <span className="px-2 py-1 rounded bg-dark-600 text-gray-500">2. API Key</span>
+              <ArrowRight size={12} />
+              <span className="px-2 py-1 rounded bg-dark-600 text-gray-500">3. 完成</span>
+            </div>
+
+            {/* 系统信息 */}
             {!embedded && (
               <div className="flex items-center justify-between text-sm text-dark-400 pb-4 border-b border-dark-700">
                 <span>操作系统</span>
@@ -188,7 +275,7 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
               </div>
             )}
 
-            {/* Node.js 状态 */}
+            {/* Node.js */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${envStatus.node_installed && envStatus.node_version_ok
@@ -206,7 +293,6 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
                   </p>
                 </div>
               </div>
-
               {envStatus.node_installed && envStatus.node_version_ok ? (
                 <CheckCircle2 className="w-6 h-6 text-green-400" />
               ) : (
@@ -216,21 +302,15 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
                   className="btn-primary text-sm px-4 py-2 flex items-center gap-2"
                 >
                   {installing === 'nodejs' ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      安装中...
-                    </>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> 安装中...</>
                   ) : (
-                    <>
-                      <Download className="w-4 h-4" />
-                      安装
-                    </>
+                    <><Download className="w-4 h-4" /> 安装</>
                   )}
                 </button>
               )}
             </div>
 
-            {/* OpenClaw 状态 */}
+            {/* OpenClaw */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${envStatus.openclaw_installed
@@ -246,27 +326,19 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
                   </p>
                 </div>
               </div>
-
               {envStatus.openclaw_installed ? (
                 <CheckCircle2 className="w-6 h-6 text-green-400" />
               ) : (
                 <button
                   onClick={handleInstallOpenclaw}
                   disabled={installing !== null || !envStatus.node_version_ok}
-                  className={`btn-primary text-sm px-4 py-2 flex items-center gap-2 ${!envStatus.node_version_ok ? 'opacity-50 cursor-not-allowed' : ''
-                    }`}
+                  className={`btn-primary text-sm px-4 py-2 flex items-center gap-2 ${!envStatus.node_version_ok ? 'opacity-50 cursor-not-allowed' : ''}`}
                   title={!envStatus.node_version_ok ? '请先安装 Node.js' : ''}
                 >
                   {installing === 'openclaw' ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      安装中...
-                    </>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> 安装中...</>
                   ) : (
-                    <>
-                      <Download className="w-4 h-4" />
-                      安装
-                    </>
+                    <><Download className="w-4 h-4" /> 安装</>
                   )}
                 </button>
               )}
@@ -293,19 +365,8 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
                 <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
                 重新检查
               </button>
-
-              {envStatus.ready && (
-                <button
-                  onClick={onComplete}
-                  className="flex-1 btn-primary py-2.5 flex items-center justify-center gap-2"
-                >
-                  开始使用
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              )}
             </div>
 
-            {/* 帮助链接 */}
             <div className="text-center pt-1">
               <a
                 href="https://nodejs.org/en/download"
@@ -320,7 +381,106 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
           </motion.div>
         )}
 
-        {/* 完成状态 */}
+        {/* API Key 配置步骤 */}
+        {!checking && step === 'apikey' && (
+          <motion.div
+            key="apikey"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="space-y-4"
+          >
+            {/* 步骤指示器 */}
+            <div className="flex items-center justify-center gap-2 text-xs text-gray-500 pb-2">
+              <span className="px-2 py-1 rounded bg-green-500/20 text-green-400">1. 环境安装 ✓</span>
+              <ArrowRight size={12} />
+              <span className="px-2 py-1 rounded bg-claw-500/20 text-claw-400">2. API Key</span>
+              <ArrowRight size={12} />
+              <span className="px-2 py-1 rounded bg-dark-600 text-gray-500">3. 完成</span>
+            </div>
+
+            <div className="text-center pb-2">
+              <div className="w-14 h-14 rounded-xl bg-claw-500/20 flex items-center justify-center mx-auto mb-3">
+                <Key size={28} className="text-claw-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-1">配置 ClawGate API Key</h3>
+              <p className="text-sm text-gray-400">
+                一个 Key 即可使用 Claude、GPT、Gemini 全部模型
+              </p>
+            </div>
+
+            {/* Key 输入 */}
+            <div className="space-y-3">
+              <div className="relative">
+                <input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={e => { setApiKey(e.target.value); setKeyError(null); }}
+                  placeholder="sk-acw-..."
+                  className="input-base pr-10 w-full text-center"
+                  onKeyDown={e => e.key === 'Enter' && handleSaveApiKey()}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+                >
+                  {showApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+
+              {keyError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg"
+                >
+                  <p className="text-red-400 text-sm flex items-center gap-2">
+                    <XCircle size={16} />
+                    {keyError}
+                  </p>
+                </motion.div>
+              )}
+
+              <button
+                onClick={handleSaveApiKey}
+                disabled={savingKey || !apiKey.trim()}
+                className="w-full btn-primary py-3 flex items-center justify-center gap-2 text-base"
+              >
+                {savingKey ? (
+                  <><Loader2 size={18} className="animate-spin" /> 配置中...</>
+                ) : (
+                  <><Check size={18} /> 开始使用</>
+                )}
+              </button>
+            </div>
+
+            {/* 底部链接 */}
+            <div className="flex items-center justify-between pt-2 border-t border-dark-700/50">
+              <button
+                onClick={() => {
+                  setStep('complete');
+                  setTimeout(() => onComplete(), 500);
+                }}
+                className="text-sm text-gray-500 hover:text-white transition-colors"
+              >
+                跳过，稍后配置
+              </button>
+              <a
+                href="https://xiaoclaw.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-claw-400 hover:text-claw-300 inline-flex items-center gap-1"
+              >
+                获取 API Key
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </motion.div>
+        )}
+
+        {/* 完成 */}
         {!checking && step === 'complete' && (
           <motion.div
             key="complete"
@@ -335,9 +495,9 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
             >
               <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-3" />
             </motion.div>
-            <h3 className="text-lg font-bold text-white mb-1">环境就绪！</h3>
+            <h3 className="text-lg font-bold text-white mb-1">配置完成！</h3>
             <p className="text-dark-400 text-sm">
-              Node.js 和 OpenClaw 已正确安装
+              OpenClaw 已就绪，开始享受 AI 助手吧
             </p>
           </motion.div>
         )}
@@ -345,7 +505,7 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
     );
   };
 
-  // 嵌入模式：作为卡片显示在 Dashboard 中
+  // 嵌入模式
   if (embedded) {
     return (
       <div className="bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 rounded-2xl p-6">
@@ -358,16 +518,14 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
             <p className="text-dark-400 text-sm">检测到缺少必要的依赖，请完成以下安装</p>
           </div>
         </div>
-
         {renderContent()}
       </div>
     );
   }
 
-  // 全屏模式（保留用于特殊情况）
+  // 全屏模式
   return (
     <div className="min-h-screen bg-dark-900 flex items-center justify-center p-8">
-      {/* 背景装饰 */}
       <div className="fixed inset-0 bg-gradient-radial pointer-events-none" />
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-brand-500/10 rounded-full blur-3xl" />
@@ -379,7 +537,6 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
         animate={{ opacity: 1, y: 0 }}
         className="relative z-10 w-full max-w-lg"
       >
-        {/* Logo 和标题 */}
         <div className="text-center mb-8">
           <motion.div
             initial={{ scale: 0.8 }}
@@ -389,11 +546,10 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
           >
             <span className="text-4xl">🦞</span>
           </motion.div>
-          <h1 className="text-2xl font-bold text-white mb-2">OpenClaw Manager</h1>
-          <p className="text-dark-400">环境检测与安装向导</p>
+          <h1 className="text-2xl font-bold text-white mb-2">ClawGate Manager</h1>
+          <p className="text-dark-400">安装向导</p>
         </div>
 
-        {/* 主卡片 */}
         <motion.div
           layout
           className="glass-card rounded-2xl p-6 shadow-xl"
@@ -401,9 +557,8 @@ export function Setup({ onComplete, embedded = false }: SetupProps) {
           {renderContent()}
         </motion.div>
 
-        {/* 版本信息 */}
         <p className="text-center text-dark-500 text-xs mt-6">
-          OpenClaw Manager v0.0.7
+          ClawGate Manager v0.1.0
         </p>
       </motion.div>
     </div>
