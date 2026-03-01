@@ -16,69 +16,128 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// GUI 应用启动时可能没有继承用户 shell 的 PATH，需要手动添加常见路径
 pub fn get_extended_path() -> String {
     let mut paths = Vec::new();
-    
-    // 添加常见的可执行文件路径
-    paths.push("/opt/homebrew/bin".to_string());  // Homebrew on Apple Silicon
-    paths.push("/usr/local/bin".to_string());      // Homebrew on Intel / 常规安装
-    paths.push("/usr/bin".to_string());
-    paths.push("/bin".to_string());
+    let separator = if cfg!(windows) { ";" } else { ":" };
     
     if let Some(home) = dirs::home_dir() {
         let home_str = home.display().to_string();
         
-        // nvm 路径（尝试获取当前版本）
-        let nvm_default = format!("{}/.nvm/alias/default", home_str);
-        if let Ok(version) = std::fs::read_to_string(&nvm_default) {
-            let version = version.trim();
-            if !version.is_empty() {
-                paths.insert(0, format!("{}/.nvm/versions/node/v{}/bin", home_str, version));
-            }
-        }
-        // 也添加常见 nvm 版本路径
-        for version in ["v22.22.0", "v22.12.0", "v22.11.0", "v22.0.0", "v23.0.0"] {
-            let nvm_bin = format!("{}/.nvm/versions/node/{}/bin", home_str, version);
-            if std::path::Path::new(&nvm_bin).exists() {
-                paths.insert(0, nvm_bin);
-                break; // 只添加第一个存在的
-            }
-        }
-        
-        // fnm (两种可能的位置)
-        paths.push(format!("{}/.fnm/aliases/default/bin", home_str));
-        // fnm XDG 路径 (macOS/Linux 默认)
-        let fnm_dir = format!("{}/.local/share/fnm/node-versions", home_str);
-        if let Ok(entries) = std::fs::read_dir(&fnm_dir) {
-            for entry in entries.flatten() {
-                let bin_path = entry.path().join("installation/bin");
-                if bin_path.exists() {
-                    paths.insert(0, bin_path.display().to_string());
-                    break;
+        #[cfg(not(windows))]
+        {
+            // macOS/Linux 系统路径
+            paths.push("/opt/homebrew/bin".to_string());
+            paths.push("/usr/local/bin".to_string());
+            paths.push("/usr/bin".to_string());
+            paths.push("/bin".to_string());
+            
+            // nvm — 动态扫描版本目录，取最新的
+            let nvm_dir = format!("{}/.nvm/versions/node", home_str);
+            if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+                let mut versions: Vec<_> = entries
+                    .flatten()
+                    .filter(|e| e.path().join("bin/node").exists())
+                    .map(|e| e.path())
+                    .collect();
+                versions.sort();
+                versions.reverse();
+                if let Some(latest) = versions.first() {
+                    paths.insert(0, latest.join("bin").display().to_string());
                 }
             }
+            
+            // fnm — XDG 路径 (macOS/Linux 默认)
+            let fnm_xdg = format!("{}/.local/share/fnm/node-versions", home_str);
+            if let Ok(entries) = std::fs::read_dir(&fnm_xdg) {
+                let mut versions: Vec<_> = entries
+                    .flatten()
+                    .filter(|e| e.path().join("installation/bin").exists())
+                    .map(|e| e.path())
+                    .collect();
+                versions.sort();
+                versions.reverse();
+                if let Some(latest) = versions.first() {
+                    paths.insert(0, latest.join("installation/bin").display().to_string());
+                }
+            }
+            // fnm aliases
+            let fnm_alias = format!("{}/.local/share/fnm/aliases/default/bin", home_str);
+            if std::path::Path::new(&fnm_alias).exists() {
+                paths.insert(0, fnm_alias);
+            }
+            let fnm_alias_old = format!("{}/.fnm/aliases/default/bin", home_str);
+            if std::path::Path::new(&fnm_alias_old).exists() {
+                paths.insert(0, fnm_alias_old);
+            }
+            
+            // volta
+            paths.push(format!("{}/.volta/bin", home_str));
+            
+            // asdf
+            paths.push(format!("{}/.asdf/shims", home_str));
+            
+            // mise
+            paths.push(format!("{}/.local/share/mise/shims", home_str));
         }
-        // fnm aliases
-        let fnm_alias = format!("{}/.local/share/fnm/aliases/default/bin", home_str);
-        if std::path::Path::new(&fnm_alias).exists() {
-            paths.insert(0, fnm_alias);
+        
+        #[cfg(windows)]
+        {
+            // Windows Node 管理器路径
+            // fnm (Windows)
+            let fnm_win = format!("{}\\.fnm\\node-versions", home_str);
+            if let Ok(entries) = std::fs::read_dir(&fnm_win) {
+                let mut versions: Vec<_> = entries
+                    .flatten()
+                    .filter(|e| e.path().join("installation").exists())
+                    .map(|e| e.path())
+                    .collect();
+                versions.sort();
+                versions.reverse();
+                if let Some(latest) = versions.first() {
+                    paths.insert(0, latest.join("installation").display().to_string());
+                }
+            }
+            // fnm XDG on Windows
+            let fnm_xdg_win = format!("{}\\AppData\\Local\\fnm_multishells", home_str);
+            if std::path::Path::new(&fnm_xdg_win).exists() {
+                if let Ok(entries) = std::fs::read_dir(&fnm_xdg_win) {
+                    if let Some(entry) = entries.flatten().last() {
+                        paths.insert(0, entry.path().display().to_string());
+                    }
+                }
+            }
+            
+            // nvm-windows
+            let nvm_win = std::env::var("NVM_HOME").unwrap_or_default();
+            if !nvm_win.is_empty() {
+                paths.push(nvm_win.clone());
+                let nvm_symlink = std::env::var("NVM_SYMLINK").unwrap_or_default();
+                if !nvm_symlink.is_empty() {
+                    paths.insert(0, nvm_symlink);
+                }
+            }
+            
+            // volta (Windows)
+            let volta_win = format!("{}\\AppData\\Local\\Volta\\bin", home_str);
+            if std::path::Path::new(&volta_win).exists() {
+                paths.push(volta_win);
+            }
+            
+            // Node.js 默认安装路径
+            paths.push("C:\\Program Files\\nodejs".to_string());
+            paths.push("C:\\Program Files (x86)\\nodejs".to_string());
+            
+            // npm 全局路径
+            let npm_global = format!("{}\\AppData\\Roaming\\npm", home_str);
+            paths.push(npm_global);
         }
-        
-        // volta
-        paths.push(format!("{}/.volta/bin", home_str));
-        
-        // asdf
-        paths.push(format!("{}/.asdf/shims", home_str));
-        
-        // mise
-        paths.push(format!("{}/.local/share/mise/shims", home_str));
     }
     
-    // 获取当前 PATH 并合并
+    // 合并当前 PATH
     let current_path = std::env::var("PATH").unwrap_or_default();
     if !current_path.is_empty() {
         paths.push(current_path);
     }
     
-    paths.join(":")
+    paths.join(separator)
 }
 
 /// 执行 Shell 命令（带扩展 PATH）

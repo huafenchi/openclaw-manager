@@ -1210,6 +1210,18 @@ async fn update_openclaw_windows() -> Result<InstallResult, String> {
 /// Unix 系统更新 OpenClaw
 async fn update_openclaw_unix() -> Result<InstallResult, String> {
     let script = r#"
+# 加载 Node 环境
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+for d in $HOME/.local/share/fnm/node-versions/*/installation/bin; do
+  [ -d "$d" ] && export PATH="$d:$PATH"
+done
+[ -d "$HOME/.fnm/aliases/default/bin" ] && export PATH="$HOME/.fnm/aliases/default/bin:$PATH"
+which fnm >/dev/null 2>&1 && eval "$(fnm env 2>/dev/null)" 2>/dev/null
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null
+export VOLTA_HOME="$HOME/.volta"
+export PATH="$VOLTA_HOME/bin:$PATH"
+
 echo "更新 OpenClaw..."
 npm install -g openclaw@latest
 

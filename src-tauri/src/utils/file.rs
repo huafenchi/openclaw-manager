@@ -47,12 +47,20 @@ pub fn read_last_lines(path: &str, n: usize) -> io::Result<Vec<String>> {
 /// 从环境变量文件读取值
 pub fn read_env_value(env_file: &str, key: &str) -> Option<String> {
     let content = read_file(env_file).ok()?;
+    let export_prefix = format!("export {}=", key);
+    let bare_prefix = format!("{}=", key);
     
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with(&format!("export {}=", key)) {
+        if line.starts_with(&export_prefix) {
             let value = line
-                .trim_start_matches(&format!("export {}=", key))
+                .trim_start_matches(&export_prefix)
+                .trim_matches('"')
+                .trim_matches('\'');
+            return Some(value.to_string());
+        } else if line.starts_with(&bare_prefix) && !line.starts_with("export") {
+            let value = line
+                .trim_start_matches(&bare_prefix)
                 .trim_matches('"')
                 .trim_matches('\'');
             return Some(value.to_string());
@@ -68,10 +76,12 @@ pub fn set_env_value(env_file: &str, key: &str, value: &str) -> io::Result<()> {
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     
     let new_line = format!("export {}=\"{}\"", key, value);
+    let export_prefix = format!("export {}=", key);
+    let bare_prefix = format!("{}=", key);
     let mut found = false;
     
     for line in &mut lines {
-        if line.starts_with(&format!("export {}=", key)) {
+        if line.starts_with(&export_prefix) || line.starts_with(&bare_prefix) {
             *line = new_line.clone();
             found = true;
             break;
@@ -82,17 +92,20 @@ pub fn set_env_value(env_file: &str, key: &str, value: &str) -> io::Result<()> {
         lines.push(new_line);
     }
     
-    write_file(env_file, &lines.join("\n"))
+    // 确保末尾有换行符
+    write_file(env_file, &(lines.join("\n") + "\n"))
 }
 
 /// 从环境变量文件中删除指定的值
 pub fn remove_env_value(env_file: &str, key: &str) -> io::Result<()> {
     let content = read_file(env_file).unwrap_or_default();
+    let export_prefix = format!("export {}=", key);
+    let bare_prefix = format!("{}=", key);
     let lines: Vec<String> = content
         .lines()
-        .filter(|line| !line.starts_with(&format!("export {}=", key)))
+        .filter(|line| !line.starts_with(&export_prefix) && !line.starts_with(&bare_prefix))
         .map(|s| s.to_string())
         .collect();
     
-    write_file(env_file, &lines.join("\n"))
+    write_file(env_file, &(lines.join("\n") + "\n"))
 }

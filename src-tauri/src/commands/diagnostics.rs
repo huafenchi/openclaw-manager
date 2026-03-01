@@ -1,7 +1,14 @@
 use crate::models::{AITestResult, ChannelTestResult, DiagnosticResult, SystemInfo};
 use crate::utils::{platform, shell};
 use tauri::command;
+use std::process::Command;
 use log::{info, warn, error, debug};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 去除 ANSI 转义序列（颜色代码等）
 fn strip_ansi_codes(input: &str) -> String {
@@ -554,6 +561,14 @@ pub async fn get_system_info() -> Result<SystemInfo, String> {
     } else if platform::is_linux() {
         shell::run_bash_output("cat /etc/os-release | grep VERSION_ID | cut -d'=' -f2 | tr -d '\"'")
             .unwrap_or_else(|_| "unknown".to_string())
+    } else if platform::is_windows() {
+        shell::run_cmd_output("cmd /c ver")
+            .unwrap_or_else(|_| "Windows".to_string())
+            .lines()
+            .find(|l| l.contains("Microsoft") || l.contains("Windows"))
+            .unwrap_or("Windows")
+            .trim()
+            .to_string()
     } else {
         "unknown".to_string()
     };
@@ -736,7 +751,22 @@ read -p "按回车键关闭..."
             
             #[cfg(target_os = "windows")]
             {
-                return Err("Windows 暂不支持自动启动终端，请手动运行: openclaw channels login --channel whatsapp".to_string());
+                // Windows: 用 cmd 打开新窗口执行登录
+                let openclaw_path = shell::get_openclaw_path()
+                    .unwrap_or_else(|| "openclaw".to_string());
+                let script = format!(
+                    "@echo off\necho WhatsApp Login - 请扫描二维码\necho.\n\"{}\" channels login --channel whatsapp\npause",
+                    openclaw_path
+                );
+                let script_path = std::env::temp_dir().join("openclaw_wa_login.bat");
+                std::fs::write(&script_path, &script)
+                    .map_err(|e| format!("写入脚本失败: {}", e))?;
+                
+                Command::new("cmd")
+                    .args(["/c", "start", "cmd", "/k", &script_path.display().to_string()])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .spawn()
+                    .map_err(|e| format!("启动终端失败: {}", e))?;
             }
             
             Ok("已在新终端窗口中启动 WhatsApp 登录，请查看弹出的终端窗口并扫描二维码".to_string())

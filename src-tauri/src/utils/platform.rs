@@ -18,8 +18,10 @@ pub fn get_config_dir() -> String {
         } else {
             format!("{}/.openclaw", home.display())
         }
+    } else if is_windows() {
+        String::from("C:\\Users\\Default\\.openclaw")
     } else {
-        String::from("~/.openclaw")
+        String::from("/tmp/.openclaw")
     }
 }
 
