@@ -721,7 +721,7 @@ read -p "按回车键关闭..."
                 std::fs::write(&script_path, &script)
                     .map_err(|e| format!("写入脚本失败: {}", e))?;
                 
-                Command::new("cmd")
+                std::process::Command::new("cmd")
                     .args(["/c", "start", "cmd", "/k", &script_path.display().to_string()])
                     .creation_flags(CREATE_NO_WINDOW)
                     .spawn()
