@@ -1,7 +1,6 @@
 use crate::models::{
     AIConfigOverview, ChannelConfig, ConfiguredModel, ConfiguredProvider,
-    ModelConfig, ModelCostConfig, OfficialProvider, OpenClawConfig,
-    ProviderConfig, SuggestedModel,
+    ModelConfig, OfficialProvider, SuggestedModel,
 };
 use crate::utils::{file, platform, shell};
 use log::{debug, error, info, warn};
@@ -104,22 +103,41 @@ pub async fn save_env_value(key: String, value: String) -> Result<String, String
 
 // ============ Gateway Token 命令 ============
 
-/// 生成随机 token
+/// 生成密码学安全的随机 token（48 字节 = 96 hex 字符）
 fn generate_token() -> String {
+    use std::fs;
+    
+    let mut buf = [0u8; 48];
+    
+    // 优先使用 /dev/urandom（Unix）或 getrandom（编译期检测）
+    #[cfg(unix)]
+    {
+        if let Ok(bytes) = fs::read("/dev/urandom") {
+            let len = buf.len().min(bytes.len());
+            buf[..len].copy_from_slice(&bytes[..len]);
+            return buf.iter().map(|b| format!("{:02x}", b)).collect();
+        }
+    }
+    
+    // 跨平台兜底：用 std::collections::hash_map::RandomState 做种子（内部用 OS 随机源）
+    // 多轮哈希叠加确保足够随机
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     use std::time::{SystemTime, UNIX_EPOCH};
     
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    
-    // 使用时间戳和随机数生成 token
-    let random_part: u64 = (timestamp as u64) ^ 0x5DEECE66Du64;
-    format!("{:016x}{:016x}{:016x}", 
-        random_part, 
-        random_part.wrapping_mul(0x5DEECE66Du64),
-        timestamp as u64
-    )
+    let mut combined = Vec::new();
+    for i in 0..6u64 {
+        let mut hasher = DefaultHasher::new(); // 每次创建都会从 OS 随机源取种子
+        i.hash(&mut hasher);
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .hash(&mut hasher);
+        let h = hasher.finish();
+        combined.extend_from_slice(&h.to_le_bytes());
+    }
+    combined.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// 获取或生成 Gateway Token

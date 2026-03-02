@@ -163,7 +163,7 @@ export function ServiceManager() {
         <div className="flex items-center gap-2 px-4 py-2 bg-dark-700 border-b border-dark-600">
           <Terminal size={14} className="text-gray-500" />
           <span className="text-xs text-gray-400 font-medium">
-            /tmp/openclaw-gateway.log
+            Gateway 日志
           </span>
           <div className="flex-1" />
           <span className="text-xs text-gray-500">

@@ -246,7 +246,7 @@ pub async fn restart_service() -> Result<String, String> {
     start_service().await
 }
 
-/// 获取日志 — 跨平台实现（不依赖 tail 命令）
+/// 获取日志 — 跨平台实现，从文件尾部读取（不会对大文件 OOM）
 #[command]
 pub async fn get_logs(lines: Option<u32>) -> Result<Vec<String>, String> {
     let n = lines.unwrap_or(100) as usize;
@@ -262,18 +262,46 @@ pub async fn get_logs(lines: Option<u32>) -> Result<Vec<String>, String> {
     
     let mut all_lines: Vec<String> = Vec::new();
     
+    // 单个文件最多读 64KB 尾部，避免大文件吃内存
+    const MAX_TAIL_BYTES: u64 = 64 * 1024;
+    
     for log_file in &log_files {
         let path = std::path::Path::new(log_file);
         if !path.exists() {
             continue;
         }
         
-        // 跨平台：直接用 Rust 读文件尾部
-        match std::fs::read_to_string(path) {
-            Ok(content) => {
-                let file_lines: Vec<&str> = content.lines().collect();
-                let start = if file_lines.len() > n { file_lines.len() - n } else { 0 };
-                for line in &file_lines[start..] {
+        match std::fs::File::open(path) {
+            Ok(file) => {
+                use std::io::{Read, Seek, SeekFrom};
+                let metadata = match file.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let file_size = metadata.len();
+                let mut file = file;
+                
+                // 只读尾部
+                let read_from = if file_size > MAX_TAIL_BYTES {
+                    file_size - MAX_TAIL_BYTES
+                } else {
+                    0
+                };
+                
+                if let Err(_) = file.seek(SeekFrom::Start(read_from)) {
+                    continue;
+                }
+                
+                let mut buf = String::new();
+                if let Err(_) = file.read_to_string(&mut buf) {
+                    continue;
+                }
+                
+                // 如果从中间开始读，跳过第一行（可能是残行）
+                let lines_iter: Vec<&str> = buf.lines().collect();
+                let start_idx = if read_from > 0 && !lines_iter.is_empty() { 1 } else { 0 };
+                
+                for line in &lines_iter[start_idx..] {
                     let trimmed = line.trim();
                     if !trimmed.is_empty() {
                         all_lines.push(trimmed.to_string());

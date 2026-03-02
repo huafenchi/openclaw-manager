@@ -1,8 +1,7 @@
 use crate::models::{AITestResult, ChannelTestResult, DiagnosticResult, SystemInfo};
 use crate::utils::{platform, shell};
 use tauri::command;
-use std::process::Command;
-use log::{info, warn, error, debug};
+use log::{info, warn, debug};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -620,54 +619,14 @@ echo "╚═══════════════════════�
 echo ""
 
 echo "步骤 1/3: 启用 WhatsApp 插件..."
+openclaw plugins install whatsapp 2>/dev/null || true
 openclaw plugins enable whatsapp 2>/dev/null || true
-
-# 确保 whatsapp 在 plugins.allow 数组中
-python3 << 'PYEOF'
-import json
-import os
-
-config_path = os.path.expanduser("~/.openclaw/openclaw.json")
-plugin_id = "whatsapp"
-
-try:
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    
-    # 设置 plugins.allow 和 plugins.entries
-    if 'plugins' not in config:
-        config['plugins'] = {{'allow': [], 'entries': {{}}}}
-    if 'allow' not in config['plugins']:
-        config['plugins']['allow'] = []
-    if 'entries' not in config['plugins']:
-        config['plugins']['entries'] = {{}}
-    
-    if plugin_id not in config['plugins']['allow']:
-        config['plugins']['allow'].append(plugin_id)
-    
-    config['plugins']['entries'][plugin_id] = {{'enabled': True}}
-    
-    # 确保 channels.whatsapp 存在（但不设置 enabled，WhatsApp 不支持这个键）
-    if 'channels' not in config:
-        config['channels'] = {{}}
-    if plugin_id not in config['channels']:
-        config['channels'][plugin_id] = {{'dmPolicy': 'pairing', 'groupPolicy': 'allowlist'}}
-    
-    with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
-    print("配置已更新")
-except Exception as e:
-    print(f"Warning: {{e}}")
-PYEOF
-
 echo "✅ 插件已启用"
 echo ""
 
 echo "步骤 2/3: 重启 Gateway 使插件生效..."
-# 使用 openclaw 命令停止和启动 gateway
 openclaw gateway stop 2>/dev/null || true
 sleep 2
-# 启动 gateway 服务
 openclaw gateway start 2>/dev/null || openclaw gateway --port 18789 &
 sleep 3
 echo "✅ Gateway 已重启"

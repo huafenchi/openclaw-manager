@@ -18,10 +18,20 @@ pub fn get_config_dir() -> String {
         } else {
             format!("{}/.openclaw", home.display())
         }
-    } else if is_windows() {
-        String::from("C:\\Users\\Default\\.openclaw")
     } else {
-        String::from("/tmp/.openclaw")
+        // 兜底：使用系统配置目录而非 /tmp（/tmp 全世界可写，不安全）
+        if let Some(config) = dirs::config_dir() {
+            if is_windows() {
+                format!("{}\\openclaw", config.display())
+            } else {
+                format!("{}/openclaw", config.display())
+            }
+        } else if is_windows() {
+            String::from("C:\\ProgramData\\openclaw")
+        } else {
+            // 最后兜底：仍比 /tmp 安全
+            String::from("/var/lib/openclaw")
+        }
     }
 }
 

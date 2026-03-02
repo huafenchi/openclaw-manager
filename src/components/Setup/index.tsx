@@ -17,6 +17,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { setupLogger } from '../../lib/logger';
+import type { OfficialProvider, ModelConfig } from '../../lib/tauri';
 
 interface EnvironmentStatus {
   node_installed: boolean;
@@ -33,37 +34,6 @@ interface InstallResult {
   success: boolean;
   message: string;
   error: string | null;
-}
-
-interface SuggestedModel {
-  id: string;
-  name: string;
-  description: string | null;
-  context_window: number | null;
-  max_tokens: number | null;
-  recommended: boolean;
-}
-
-interface OfficialProvider {
-  id: string;
-  name: string;
-  icon: string;
-  default_base_url: string | null;
-  api_type: string;
-  suggested_models: SuggestedModel[];
-  requires_api_key: boolean;
-  docs_url: string | null;
-}
-
-interface ModelConfig {
-  id: string;
-  name: string;
-  api: string | null;
-  input: string[];
-  context_window: number | null;
-  max_tokens: number | null;
-  reasoning: boolean | null;
-  cost: { input: number; output: number; cache_read: number; cache_write: number } | null;
 }
 
 interface SetupProps {

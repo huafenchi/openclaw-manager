@@ -366,13 +366,22 @@ fn get_unix_openclaw_paths() -> Vec<String> {
         // npm 全局安装到用户目录
         paths.push(format!("{}/.npm-global/bin/openclaw", home_str));
         
-        // nvm 安装的 npm 全局包（需要找到正确的 node 版本目录）
-        // 先检查常见版本
-        for version in ["v22.0.0", "v22.1.0", "v22.2.0", "v22.11.0", "v22.12.0", "v23.0.0"] {
-            paths.push(format!("{}/.nvm/versions/node/{}/bin/openclaw", home_str, version));
+        // nvm — 动态扫描版本目录，取最新的
+        let nvm_dir = format!("{}/.nvm/versions/node", home_str);
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            let mut versions: Vec<_> = entries
+                .flatten()
+                .filter(|e| e.path().join("bin/openclaw").exists())
+                .map(|e| e.path())
+                .collect();
+            versions.sort();
+            versions.reverse();
+            for v in versions.iter().take(3) {
+                paths.push(v.join("bin/openclaw").display().to_string());
+            }
         }
         
-        // 检查 nvm current（尝试读取 .nvmrc 或 default）
+        // nvm alias default
         let nvm_default = format!("{}/.nvm/alias/default", home_str);
         if let Ok(version) = std::fs::read_to_string(&nvm_default) {
             let version = version.trim();
@@ -381,8 +390,29 @@ fn get_unix_openclaw_paths() -> Vec<String> {
             }
         }
         
-        // fnm
-        paths.push(format!("{}/.fnm/aliases/default/bin/openclaw", home_str));
+        // fnm — XDG 路径 (macOS/Linux 默认)
+        let fnm_xdg = format!("{}/.local/share/fnm/node-versions", home_str);
+        if let Ok(entries) = std::fs::read_dir(&fnm_xdg) {
+            let mut versions: Vec<_> = entries
+                .flatten()
+                .filter(|e| e.path().join("installation/bin/openclaw").exists())
+                .map(|e| e.path())
+                .collect();
+            versions.sort();
+            versions.reverse();
+            if let Some(latest) = versions.first() {
+                paths.insert(0, latest.join("installation/bin/openclaw").display().to_string());
+            }
+        }
+        // fnm aliases
+        let fnm_alias = format!("{}/.local/share/fnm/aliases/default/bin/openclaw", home_str);
+        if std::path::Path::new(&fnm_alias).exists() {
+            paths.insert(0, fnm_alias);
+        }
+        let fnm_alias_old = format!("{}/.fnm/aliases/default/bin/openclaw", home_str);
+        if std::path::Path::new(&fnm_alias_old).exists() {
+            paths.insert(0, fnm_alias_old);
+        }
         
         // volta
         paths.push(format!("{}/.volta/bin/openclaw", home_str));

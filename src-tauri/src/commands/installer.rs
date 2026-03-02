@@ -154,19 +154,25 @@ fn get_unix_node_paths() -> Vec<String> {
     // 系统安装
     paths.push("/usr/bin/node".to_string());
     
-    // nvm (检查常见版本)
     if let Some(home) = dirs::home_dir() {
         let home_str = home.display().to_string();
         
-        // nvm 默认版本
-        paths.push(format!("{}/.nvm/versions/node/v22.0.0/bin/node", home_str));
-        paths.push(format!("{}/.nvm/versions/node/v22.1.0/bin/node", home_str));
-        paths.push(format!("{}/.nvm/versions/node/v22.2.0/bin/node", home_str));
-        paths.push(format!("{}/.nvm/versions/node/v22.11.0/bin/node", home_str));
-        paths.push(format!("{}/.nvm/versions/node/v22.12.0/bin/node", home_str));
-        paths.push(format!("{}/.nvm/versions/node/v23.0.0/bin/node", home_str));
+        // nvm — 动态扫描版本目录，取最新的
+        let nvm_dir = format!("{}/.nvm/versions/node", home_str);
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            let mut versions: Vec<_> = entries
+                .flatten()
+                .filter(|e| e.path().join("bin/node").exists())
+                .map(|e| e.path())
+                .collect();
+            versions.sort();
+            versions.reverse();
+            for v in versions.iter().take(3) {
+                paths.push(v.join("bin/node").display().to_string());
+            }
+        }
         
-        // 尝试 nvm alias default（读取 nvm 的 default alias）
+        // nvm alias default
         let nvm_default = format!("{}/.nvm/alias/default", home_str);
         if let Ok(version) = std::fs::read_to_string(&nvm_default) {
             let version = version.trim();
@@ -175,7 +181,25 @@ fn get_unix_node_paths() -> Vec<String> {
             }
         }
         
-        // fnm
+        // fnm — XDG 路径 (macOS/Linux 默认)
+        let fnm_xdg = format!("{}/.local/share/fnm/node-versions", home_str);
+        if let Ok(entries) = std::fs::read_dir(&fnm_xdg) {
+            let mut versions: Vec<_> = entries
+                .flatten()
+                .filter(|e| e.path().join("installation/bin/node").exists())
+                .map(|e| e.path())
+                .collect();
+            versions.sort();
+            versions.reverse();
+            if let Some(latest) = versions.first() {
+                paths.insert(0, latest.join("installation/bin/node").display().to_string());
+            }
+        }
+        // fnm aliases
+        let fnm_alias = format!("{}/.local/share/fnm/aliases/default/bin/node", home_str);
+        if std::path::Path::new(&fnm_alias).exists() {
+            paths.insert(0, fnm_alias);
+        }
         paths.push(format!("{}/.fnm/aliases/default/bin/node", home_str));
         
         // volta
